@@ -19,8 +19,8 @@ const (
 )
 
 type User struct {
-	PubKey        *rsa.PublicKey
-	PartnerPubKey *rsa.PublicKey
+	PubKey        rsa.PublicKey
+	PartnerPubKey rsa.PublicKey
 	Username      string
 }
 
@@ -28,7 +28,7 @@ func CreateUser() User {
 	_, pubkey := GenerateKeyPair(2048)
 	username := fmt.Sprintf("alice%v", rand.Intn(500))
 	log.Println("Your random username is:", username)
-	return User{PubKey: pubkey, Username: username}
+	return User{PubKey: *pubkey, Username: username}
 }
 
 func (u *User) ConnectToServer(host string, partner string) {
@@ -51,6 +51,7 @@ func (u *User) ConnectToServer(host string, partner string) {
 
 func (u *User) Register(conn net.Conn, connbuff *bufio.Reader) {
 	pkey, _ := json.Marshal(u.PubKey)
+	fmt.Println(pkey)
 	text := fmt.Sprintf("%v:%v:%v\n", REGISTER, u.Username, pkey)
 	fmt.Fprintf(conn, text)
 	message, _ := connbuff.ReadString('\n') // listen for reply
@@ -61,9 +62,7 @@ func (u *User) GetPartnerKey(target string, conn net.Conn, connbuff *bufio.Reade
 	log.Printf("Retrieving %v's public key from server", target)
 	text := fmt.Sprintf("%v:%v\n", GETPUBLICKEY, target)
 	fmt.Fprintf(conn, text)
-	fmt.Println("wrote to connection")
-	response, err := connbuff.ReadString('\n')
-	fmt.Println(err)
+	response, _ := connbuff.ReadString('\n')
 	fmt.Println("public key:", response)
 }
 

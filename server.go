@@ -44,33 +44,37 @@ func StartServer(host string) {
 func handleRequest(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
-	rec, err := reader.ReadString('\n')
 
-	if err != nil {
-		log.Println("Error reading:", err.Error())
+	for {
+		rec, err := reader.ReadString('\n')
+
+		if err != nil {
+			// log.Println("Error reading:", err.Error())
+			// conn.Close()
+			break
+		}
+
+		log.Println("Got message")
+
+		if strings.HasPrefix(rec, "REG:") {
+			handleRegistration(conn, rec)
+		}
+
+		if strings.HasPrefix(rec, "MSG:") {
+			handleMessages(rec)
+			return
+		}
+
+		if strings.HasPrefix(rec, "GETPKEY:") {
+			fmt.Println("i am here")
+			handlePublicKeyRetrieval(conn, rec)
+			return
+		}
+
+		// Send a response back to person contacting us.
+		conn.Write([]byte("Message received."))
 	}
 
-	log.Println("Got message")
-
-	if strings.HasPrefix(rec, "REG:") {
-		handleRegistration(conn, rec)
-		return
-	}
-
-	if strings.HasPrefix(rec, "MSG:") {
-		handleMessages(rec)
-		return
-	}
-
-	if strings.HasPrefix(rec, "GETPKEY:") {
-		fmt.Println("i am here")
-		handlePublicKeyRetrieval(conn, rec)
-		return
-	}
-
-	// Send a response back to person contacting us.
-	conn.Write([]byte("Message received."))
-	// conn.Close()
 }
 
 // handleRegistration is the main handler for new users announcing their
@@ -79,10 +83,10 @@ func handleRegistration(conn net.Conn, rec string) {
 	s := strings.Split(rec, ":")
 	username := s[1]
 	username = strings.ToLower(username)
-	publicKey := rsa.PublicKey{}
-	json.Unmarshal([]byte(s[2]), &publicKey)
+	publicKey := &rsa.PublicKey{}
+	json.Unmarshal([]byte(s[2]), publicKey)
 	connections[username] = conn
-	publicKeys[username] = publicKey
+	publicKeys[username] = *publicKey
 	log.Println("Registered user: ", username)
 	conn.Write([]byte("Connection successful\n"))
 }
@@ -90,6 +94,8 @@ func handleRegistration(conn net.Conn, rec string) {
 func handlePublicKeyRetrieval(conn net.Conn, rec string) {
 	split := strings.Split(rec, ":")
 	username := split[1] // the username whose public key is being queried
+	fmt.Println("username is", username)
+	fmt.Println(publicKeys)
 	pkey := publicKeys[username]
 	fmt.Println("the key is ", pkey)
 	// if pkey != nil {
