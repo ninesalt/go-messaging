@@ -1,28 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"strings"
 )
-
-type Entry struct {
-	SessionID uint32
-	Alice     User
-	Bob       User
-}
-
-type Memory struct {
-	Mapping map[uint32]*Entry
-}
-
-func SendToUser() {
-	//TODO
-}
 
 var connections = make(map[string]net.Conn)
 var publicKeys = make(map[string]rsa.PublicKey)
@@ -31,11 +19,9 @@ func StartServer(host string) {
 
 	l, err := net.Listen("tcp", host)
 	log.Println("Starting server on:", host)
-	// connections := make(map[string]net.Conn)
 
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	defer l.Close()
@@ -45,10 +31,10 @@ func StartServer(host string) {
 		// Listen for an incoming connection.
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error accepting: ", err.Error())
-			os.Exit(1)
+			log.Fatal("Error accepting: ", err.Error())
 		}
 		// Handle connections in a new goroutine.
+		fmt.Println("got a new connection")
 		go handleRequest(conn)
 	}
 
@@ -57,47 +43,81 @@ func StartServer(host string) {
 // Handles incoming requests.
 func handleRequest(conn net.Conn) {
 
-	buff := make([]byte, 1024)
-	_, err := conn.Read(buff) // write rec data in buff
+	reader := bufio.NewReader(conn)
+	rec, err := reader.ReadString('\n')
+
 	if err != nil {
-		fmt.Println("Error reading:", err.Error())
+		log.Println("Error reading:", err.Error())
 	}
 
-	rec := string(buff)
-	log.Println("Got message:", rec)
+	log.Println("Got message")
 
 	if strings.HasPrefix(rec, "REG:") {
-		s := strings.Split(rec, ":")
-		username := s[1]
-		publicKey := rsa.PublicKey{}
-		json.Unmarshal([]byte(s[2]), &publicKey)
-		log.Printf("Registering user: %v", username)
-
-		connections[username] = conn
-		publicKeys[username] = publicKey
-
-		conn.Write([]byte("Server connection successful\n"))
+		handleRegistration(conn, rec)
 		return
 	}
 
-	s := strings.Split(rec, ", ") // message, sender, receiver
-	var message, sender, receiver string
-
-	if len(s) == 3 {
-		message = s[0]
-		sender = s[1]
-		receiver = s[2]
+	if strings.HasPrefix(rec, "MSG:") {
+		handleMessages(rec)
+		return
 	}
 
-	fmt.Println(message, sender, receiver)
-
-	if c := connections[receiver]; c != nil {
-		c.Write([]byte(message))
-	} else {
-		log.Printf("Could not deliver message to user %v because connection was not found\n", receiver)
+	if strings.HasPrefix(rec, "GETPKEY:") {
+		fmt.Println("i am here")
+		handlePublicKeyRetrieval(conn, rec)
+		return
 	}
 
 	// Send a response back to person contacting us.
 	conn.Write([]byte("Message received."))
 	// conn.Close()
+}
+
+// handleRegistration is the main handler for new users announcing their
+// username and public key to the server
+func handleRegistration(conn net.Conn, rec string) {
+	s := strings.Split(rec, ":")
+	username := s[1]
+	username = strings.ToLower(username)
+	publicKey := rsa.PublicKey{}
+	json.Unmarshal([]byte(s[2]), &publicKey)
+	connections[username] = conn
+	publicKeys[username] = publicKey
+	log.Println("Registered user: ", username)
+	conn.Write([]byte("Connection successful\n"))
+}
+
+func handlePublicKeyRetrieval(conn net.Conn, rec string) {
+	split := strings.Split(rec, ":")
+	username := split[1] // the username whose public key is being queried
+	pkey := publicKeys[username]
+	fmt.Println("the key is ", pkey)
+	// if pkey != nil {
+	p, _ := json.Marshal(pkey)
+	conn.Write([]byte(p))
+	// }
+
+}
+
+func handleMessages(msg string) error {
+
+	split := strings.Split(msg, ":")
+	target := split[1]
+	c := connections[target]
+
+	if c == nil {
+		log.Printf("Could not find connection object for target user%v\n", target)
+		return errors.New("No connection found for target")
+	}
+	c.Write([]byte(msg))
+	return nil
+}
+
+func main() {
+	host := flag.String("host", "localhost", "Host where the server should listen on")
+	port := flag.String("port", "5000", "Port to listen on")
+	flag.Parse()
+
+	addr := fmt.Sprintf("%v:%v", *host, *port)
+	StartServer(addr)
 }
