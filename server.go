@@ -12,6 +12,10 @@ import (
 	"strings"
 )
 
+type StandardMessage struct {
+	Header string
+}
+
 var connections = make(map[string]net.Conn)
 var publicKeys = make(map[string]rsa.PublicKey)
 
@@ -34,7 +38,6 @@ func StartServer(host string) {
 			log.Fatal("Error accepting: ", err.Error())
 		}
 		// Handle connections in a new goroutine.
-		fmt.Println("got a new connection")
 		go handleRequest(conn)
 	}
 
@@ -43,66 +46,59 @@ func StartServer(host string) {
 // Handles incoming requests.
 func handleRequest(conn net.Conn) {
 
-	reader := bufio.NewReader(conn)
+	scanner := bufio.NewScanner(conn)
+	defer conn.Close()
 
-	for {
-		rec, err := reader.ReadString('\n')
+	for scanner.Scan() {
+		content := scanner.Bytes()
+		parsed := StandardMessage{}
+		json.Unmarshal(content, &parsed)
 
-		if err != nil {
-			// log.Println("Error reading:", err.Error())
-			// conn.Close()
+		if err := scanner.Err(); err != nil {
+			log.Printf("error reading connection: %v\n", err)
 			break
 		}
 
-		log.Println("Got message")
-
-		if strings.HasPrefix(rec, "REG:") {
-			handleRegistration(conn, rec)
+		switch parsed.Header {
+		case "REG":
+			handleRegistration(conn, content)
+		case "GETPKEY":
+			handlePublicKeyRetrieval(conn, content)
 		}
-
-		if strings.HasPrefix(rec, "MSG:") {
-			handleMessages(rec)
-			return
-		}
-
-		if strings.HasPrefix(rec, "GETPKEY:") {
-			fmt.Println("i am here")
-			handlePublicKeyRetrieval(conn, rec)
-			return
-		}
-
-		// Send a response back to person contacting us.
-		conn.Write([]byte("Message received."))
 	}
 
 }
 
 // handleRegistration is the main handler for new users announcing their
 // username and public key to the server
-func handleRegistration(conn net.Conn, rec string) {
-	s := strings.Split(rec, ":")
-	username := s[1]
-	username = strings.ToLower(username)
-	publicKey := &rsa.PublicKey{}
-	json.Unmarshal([]byte(s[2]), publicKey)
+func handleRegistration(conn net.Conn, content []byte) {
+
+	type RegisterMessage struct {
+		Username  string
+		PublicKey rsa.PublicKey
+	}
+
+	r := RegisterMessage{}
+	json.Unmarshal(content, &r)
+	username := strings.ToLower(r.Username)
 	connections[username] = conn
-	publicKeys[username] = *publicKey
+	publicKeys[username] = r.PublicKey
 	log.Println("Registered user: ", username)
-	conn.Write([]byte("Connection successful\n"))
+	conn.Write([]byte("User registration successful\n"))
 }
 
-func handlePublicKeyRetrieval(conn net.Conn, rec string) {
-	split := strings.Split(rec, ":")
-	username := split[1] // the username whose public key is being queried
-	fmt.Println("username is", username)
-	fmt.Println(publicKeys)
-	pkey := publicKeys[username]
-	fmt.Println("the key is ", pkey)
-	// if pkey != nil {
-	p, _ := json.Marshal(pkey)
-	conn.Write([]byte(p))
-	// }
+func handlePublicKeyRetrieval(conn net.Conn, content []byte) {
 
+	type GetPublicKeyMessage struct {
+		Username string // the partner's username
+	}
+
+	message := GetPublicKeyMessage{}
+	json.Unmarshal(content, &message)
+	u := strings.ToLower(message.Username)
+	pkey := publicKeys[u]
+	encoder := json.NewEncoder(conn)
+	encoder.Encode(pkey)
 }
 
 func handleMessages(msg string) error {

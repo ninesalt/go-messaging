@@ -24,6 +24,12 @@ type User struct {
 	Username      string
 }
 
+type RegisterMessage struct {
+	Header    string
+	Username  string
+	PublicKey rsa.PublicKey
+}
+
 func CreateUser() User {
 	_, pubkey := GenerateKeyPair(2048)
 	username := fmt.Sprintf("alice%v", rand.Intn(500))
@@ -44,31 +50,60 @@ func (u *User) ConnectToServer(host string, partner string) {
 		u.GetPartnerKey(partner, conn, connbuff)
 	}
 
-	// for {
+	if isValidPublicKey(u.PartnerPubKey) {
+		log.Println("Ready to chat")
+		for {
 
-	// }
+		}
+	}
+
 }
 
 func (u *User) Register(conn net.Conn, connbuff *bufio.Reader) {
-	pkey, _ := json.Marshal(u.PubKey)
-	fmt.Println(pkey)
-	text := fmt.Sprintf("%v:%v:%v\n", REGISTER, u.Username, pkey)
-	fmt.Fprintf(conn, text)
+
+	enc := json.NewEncoder(conn)
+	registermessage := RegisterMessage{Header: REGISTER,
+		Username: u.Username, PublicKey: u.PubKey}
+
+	enc.Encode(registermessage)
 	message, _ := connbuff.ReadString('\n') // listen for reply
-	fmt.Print("Server: " + message)
+	log.Print(message)
 }
 
 func (u *User) GetPartnerKey(target string, conn net.Conn, connbuff *bufio.Reader) {
+
+	type GetPublicKeyMessage struct {
+		Header   string
+		Username string // the partner's username
+	}
+
+	// send the request to get the public key message
+	enc := json.NewEncoder(conn)
+	g := GetPublicKeyMessage{Header: GETPUBLICKEY, Username: target}
 	log.Printf("Retrieving %v's public key from server", target)
-	text := fmt.Sprintf("%v:%v\n", GETPUBLICKEY, target)
-	fmt.Fprintf(conn, text)
-	response, _ := connbuff.ReadString('\n')
-	fmt.Println("public key:", response)
+	enc.Encode(g)
+
+	// decode the response
+	dec := json.NewDecoder(conn)
+	publicKey := rsa.PublicKey{}
+	dec.Decode(&publicKey)
+
+	if isValidPublicKey(publicKey) {
+		u.PartnerPubKey = publicKey
+		log.Println("Partner public key retrieved and saved")
+	} else {
+		log.Println("Could not retrieve partner's public key")
+	}
 }
 
 // SendMessage sends a message to a target given the message and the target's username
 func SendMessage(msg string, target string) {
 
+}
+
+func isValidPublicKey(pkey rsa.PublicKey) bool {
+	empty := rsa.PublicKey{}
+	return pkey != empty
 }
 
 func main() {
